@@ -257,8 +257,11 @@ Step 5 - Hardware bring-up
 Step 6 - Sim-to-real sensitivity
 
 - run `unicycle_sim2real_sensitivity()`
-- the most fragile parameters are body mass and CoM height
-- if hardware behavior diverges, update `m_body` or `L_body`, then re-export `firmware_params.h`
+- before touching hardware, run `unicycle_sim2real_sensitivity()` one more time and record the two most fragile parameters
+- in the current model those are body mass at about `+/-15%` and CoM height at about `+/-10%`
+- if hardware behavior diverges from prediction, update `m_body` and `L_body` first in `unicycle_config.m`
+- then rerun `unicycle_export_firmware`, re-flash the ESP32, and compare again
+- that is the intended feedback loop between the MATLAB design and the physical robot
 
 ## Known limitations
 
