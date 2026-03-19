@@ -1,0 +1,6 @@
+results/
+*.asv
+*.autosave
+*.mlx
+*.log
+*.mat
