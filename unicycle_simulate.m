@@ -66,7 +66,8 @@ if online_id_active
     xe_rls_prev = x_est(:,1);
 else
     rls = struct('theta_init', [], 'theta', [], ...
-        'update_count', 0, 'gain_update_count', 0);
+        'update_count', 0, 'gain_update_count', 0, ...
+        'P', zeros(2), 'y_filt', 0, 'P_max', []);
     xe_rls_prev = zeros(nx,1);
 end
 
@@ -139,6 +140,11 @@ for k = 1:N
             if rls.update_count >= cfg.online_id_min_updates && ...
                     mod(rls.update_count, cfg.online_id_recompute_every) == 0
                 [A_est, B_est] = unicycle_rls('plant', rls, A, B);
+                theta_1_nom = cfg.m_body * cfg.g * cfg.L_body / ...
+                    (cfg.I_body + cfg.m_body * cfg.L_body^2);
+                theta_valid = rls.theta(1) > 0 && ...
+                    rls.theta(1) < 3.0 * theta_1_nom && ...
+                    rls.theta(2) > 0;
                 A_aug_est = zeros(7);
                 A_aug_est(1:5,1:5) = A_est;
                 A_aug_est(6,1) = 1;
@@ -146,12 +152,17 @@ for k = 1:N
                 A_aug_est(7,3) = 1;
                 A_aug_est(7,7) = -cfg.integrator_leak;
                 B_aug_est = [B_est; zeros(2,2)];
-                try
-                    [Ad_aug_est, Bd_aug_est] = unicycle_discretize(A_aug_est, B_aug_est, dt);
-                    ctrl.K = dlqr(Ad_aug_est, Bd_aug_est, ctrl.Q_aug, ctrl.R_aug);
-                    rls.gain_update_count = rls.gain_update_count + 1;
-                catch
-                    % Keep the current gain if the estimated model is ill-conditioned.
+                if theta_valid
+                    try
+                        [Ad_aug_est, Bd_aug_est] = unicycle_discretize(A_aug_est, B_aug_est, dt);
+                        K_new = dlqr(Ad_aug_est, Bd_aug_est, ctrl.Q_aug, ctrl.R_aug);
+                        ctrl.K(:, [1, 2, 6]) = K_new(:, [1, 2, 6]);
+                        rls.gain_update_count = rls.gain_update_count + 1;
+                    catch
+                        % Keep the current gain if the estimated model is ill-conditioned.
+                    end
+                    fprintf('  [RLS] t=%.2fs  theta=[%.3f, %.4f]  P_diag=[%.3f, %.5f]\n', ...
+                        k * cfg.dt, rls.theta(1), rls.theta(2), rls.P(1,1), rls.P(2,2));
                 end
             end
         end

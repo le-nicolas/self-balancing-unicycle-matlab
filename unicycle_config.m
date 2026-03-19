@@ -47,6 +47,8 @@ cfg.T_sim    = 20.0;        % [s]  deterministic benchmark duration
 cfg.N        = round(cfg.T_sim / cfg.dt);
 cfg.single_kick_T_sim = 10.0;  % [s] preserve legacy single-kick callers
 cfg.benchmark_seed = 1234;     % deterministic nominal benchmark noise
+cfg.hil_smoke_duration = 1.0;  % [s] synthetic HIL smoke-test duration
+cfg.hil_timeout_steps = 20;    % [steps] stale-sensor watchdog window
 
 %% ── Initial conditions ───────────────────────────────────────
 % State vector: [pitch, dpitch, roll, droll, omega_rw]
@@ -86,6 +88,8 @@ cfg.enable_online_id = false;
 cfg.rls_lambda = 0.98;
 cfg.online_id_min_updates = 60;
 cfg.online_id_recompute_every = 25;
+cfg.rls_accel_alpha = 0.3;
+cfg.rls_P_max = 50;
 
 %% ── MPC settings (baseline_mpc family) ──────────────────────
 cfg.mpc_horizon = 20;       % prediction horizon (steps)

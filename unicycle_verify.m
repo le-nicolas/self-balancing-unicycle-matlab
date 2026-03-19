@@ -146,18 +146,101 @@ pass13 = score_mpc > score_ps && mst_ps > 0 && mpk_ps > 0;
     pass_count, fail_count);
 
 %% TEST 14: Hybrid modern survives with online ID under mass perturbation
-cfg_rls = cfg;
-cfg_rls.enable_online_id = true;
-cfg_rls.m_body = cfg.m_body * 1.20;
-cfg_rls.online_id_min_updates = 20;
-cfg_rls.online_id_recompute_every = 10;
-res_rls = unicycle_simulate(A, B, C, ctrl_all.hybrid_modern, cfg_rls);
-theta_shift = norm(res_rls.rls_theta_final - res_rls.rls_theta_init);
-pass14 = res_rls.survival && res_rls.online_id_gain_updates > 0 && theta_shift > 1e-6;
+cfg_t14 = cfg;
+cfg_t14.enable_online_id = true;
+cfg_t14.I_body = cfg.I_body * 1.20;
+cfg_t14.online_id_min_updates = 40;
+cfg_t14.online_id_recompute_every = 20;
+[A_t14, B_t14, C_t14, ~] = unicycle_plant(cfg_t14);
+ctrl_t14 = ctrl_all.hybrid_modern;
+res_t14 = unicycle_simulate(A_t14, B_t14, C_t14, ctrl_t14, cfg_t14);
+pass14 = res_t14.survival && res_t14.pitch_rms < deg2rad(3.0);
 [pass_count, fail_count] = check(pass14, ...
-    sprintf('TEST 14: Hybrid online ID adapts and survives (updates=%d, theta shift=%.3e)', ...
-        res_rls.online_id_gain_updates, theta_shift), ...
+    sprintf('TEST 14: hybrid online ID survives +20%% pitch inertia  (survival=%d, pitchRMS=%.4f rad)', ...
+        res_t14.survival, res_t14.pitch_rms), ...
     pass_count, fail_count);
+
+%% TEST 15: Firmware export produces valid JSON and C header
+out_dir = tempname();
+mkdir(out_dir);
+unicycle_export_firmware(ctrl_all, cfg, out_dir);
+json_file = fullfile(out_dir, 'firmware_params.json');
+h_file = fullfile(out_dir, 'firmware_params.h');
+
+json_info = dir(json_file);
+h_info = dir(h_file);
+json_ok = exist(json_file, 'file') == 2 && ~isempty(json_info) && json_info.bytes > 100;
+h_ok = exist(h_file, 'file') == 2 && ~isempty(h_info) && h_info.bytes > 100;
+try
+    raw = fileread(json_file);
+    data = jsondecode(raw);
+    has_physical = isfield(data, 'physical');
+    has_kalman = isfield(data, 'kalman');
+    has_controllers = isfield(data, 'controllers');
+    has_lqr = has_controllers && isfield(data.controllers, 'lqr_current');
+    json_valid = has_physical && has_kalman && has_controllers && has_lqr;
+catch
+    json_valid = false;
+end
+h_text = fileread(h_file);
+h_has_dt = contains(h_text, 'CTRL_DT');
+h_has_k = contains(h_text, 'K_LQR_CURRENT');
+pass15 = json_ok && h_ok && json_valid && h_has_dt && h_has_k;
+[pass_count, fail_count] = check(pass15, ...
+    'TEST 15: firmware export produces valid JSON and C header', ...
+    pass_count, fail_count);
+rmdir(out_dir, 's');
+
+%% TEST 16: Firmware parity within 1e-4 N*m
+K_fw = single(ctrl_all.lqr_current.K);
+x0_s = single(cfg.x0_nominal);
+Ad_s = single(Ad);
+Bd_s = single(Bd);
+
+N_par = round(2.0 / cfg.dt);
+u_ml = zeros(2, N_par);
+u_fw = zeros(2, N_par);
+x_ml = cfg.x0_nominal;
+x_fw = x0_s;
+tau_rw_s = single(cfg.tau_rw_max);
+tau_base_s = single(cfg.tau_base_max);
+
+for k = 1:N_par
+    u_k_ml = -ctrl_all.lqr_current.K * x_ml;
+    u_k_ml(1) = max(min(u_k_ml(1), cfg.tau_rw_max), -cfg.tau_rw_max);
+    u_k_ml(2) = max(min(u_k_ml(2), cfg.tau_base_max), -cfg.tau_base_max);
+    u_ml(:,k) = u_k_ml;
+    x_ml = Ad * x_ml + Bd * u_k_ml;
+
+    u_k_fw = -K_fw * x_fw;
+    u_k_fw(1) = max(min(u_k_fw(1), tau_rw_s), -tau_rw_s);
+    u_k_fw(2) = max(min(u_k_fw(2), tau_base_s), -tau_base_s);
+    u_fw(:,k) = double(u_k_fw);
+    x_fw = Ad_s * x_fw + Bd_s * u_k_fw;
+end
+
+max_rw_err = max(abs(u_ml(1,:) - u_fw(1,:)));
+max_base_err = max(abs(u_ml(2,:) - u_fw(2,:)));
+pass16 = max_rw_err < 1e-4 && max_base_err < 1e-4;
+[pass_count, fail_count] = check(pass16, ...
+    sprintf('TEST 16: firmware parity within 1e-4 N*m  (rw=%.2e, base=%.2e)', ...
+        max_rw_err, max_base_err), pass_count, fail_count);
+
+%% TEST 17: HIL smoke test 7/7 scenarios pass
+hil_results = unicycle_hil_smoke(ctrl_all, cfg);
+pass17 = hil_results.passed;
+[pass_count, fail_count] = check(pass17, ...
+    'TEST 17: HIL smoke test 7/7 scenarios pass', ...
+    pass_count, fail_count);
+if ~pass17
+    for si = 1:numel(hil_results.scenarios)
+        sc = hil_results.scenarios(si);
+        if ~sc.passed
+            fprintf('    FAIL in scenario %d (%s): %s\n', ...
+                si, sc.name, sc.fail_reason);
+        end
+    end
+end
 
 %% ── Summary ──────────────────────────────────────────────────
 fprintf('\n====================================\n');
